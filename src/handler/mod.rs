@@ -1,3 +1,3 @@
 mod handler;
 
-pub use handler::{Handler, THandler};
+pub use handler::{THandler};
