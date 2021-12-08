@@ -2,6 +2,14 @@
 
 # Rust - POSIX MQ
 
+## Mount
+
+```bash
+sudo mkdir /dev/mqueue
+sudo mount -t mqueue none /dev/mqueue/
+
+```
+
 ## Usage
 
 ### Define handler
