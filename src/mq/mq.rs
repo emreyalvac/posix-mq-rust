@@ -3,7 +3,7 @@ use std::os::raw::{c_char, c_int, c_long, c_uint};
 use crate::{Handler, Options, THandler, TOptions};
 
 pub const MAX_MESSAGES: c_long = 10;
-pub const MAX_MSG_SIZE: c_long = 24;
+pub const MAX_MSG_SIZE: c_long = 2048;
 pub const QUEUE_PERMISSIONS: c_int = 0600;
 pub const SERVER_QUEUE_NAME: &str = "/mqtest.pwPa";
 
@@ -21,7 +21,6 @@ fn build_mq_attr(mq_flags: c_long, mq_curmsgs: c_long) -> MqAttr {
         mq_msgsize: MAX_MSG_SIZE,
     }
 }
-
 
 #[repr(C)]
 #[derive(Debug)]
@@ -122,12 +121,13 @@ impl<T> TPosixMQ<T> for PosixMQ<T> where T: THandler + Send + Sync + Sized {
         }
 
         loop {
-            let mut buffer = [0u8; MAX_MSG_SIZE as usize];
+            let buffer = CString::default();
+            let ptr = buffer.as_ptr();
             unsafe {
-                mq_receive(self.queue_fd, buffer.as_ptr() as *const c_char, buffer.len(), std::ptr::null_mut())
+                mq_receive(self.queue_fd, ptr, MAX_MSG_SIZE as usize, std::ptr::null_mut())
             };
 
-            self.handler.handle_queue_event(Vec::from(buffer))
+            self.handler.handle_queue_event(buffer.as_ptr())
         }
     }
 

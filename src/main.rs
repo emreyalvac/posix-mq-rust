@@ -16,22 +16,19 @@ fn send_simulation(queue_fd: c_int) -> c_int {
     }
 }
 
+pub struct Handler {}
+
+impl THandler for Handler {
+    fn handle_queue_event(&self, buffer: *const c_char) -> () {
+        println!("{:?}", buffer);
+    }
+}
+
 fn main() {
-    // Handler
     let handler = Handler {};
-
-    // Options
     let options = Options::new().read_n_write();
-
     let mut posix_mq = PosixMQ::new(options, handler);
+
     posix_mq.create_queue(String::from("/mq_instance_1")).expect("mq_open failed");
-
-    // std::thread::spawn(move || {
-    //     loop {
-    //         posix_mq.publish_message(String::from("testasdasdasdas"));
-    //         std::thread::sleep(std::time::Duration::from_millis(2000));
-    //     }
-    // });
-
     posix_mq.receive_from_queue();
 }
