@@ -1,48 +1,58 @@
+use std::io::Error;
 use std::os::raw::c_int;
-use crate::{O_RDONLY, O_RDWR, O_WRONLY, PosixMQ};
+use crate::{Handler, O_RDONLY, O_RDWR, O_WRONLY, PosixMQ, THandler};
+use crate::mq::TPosixMQ;
 
 
 pub trait TOptions {
-    fn new() -> Self;
-    fn read_only(&self) -> Self;
-    fn write_only(&self) -> Self;
-    fn read_n_write(&self) -> Self;
-    fn get_o_flag(&self) -> Option<c_int>;
+    fn new(flag: c_int) -> Self;
+    fn read_only() -> Self;
+    fn write_only() -> Self;
+    fn read_n_write() -> Self;
+    fn with_handler<T>(&mut self, handler: T) -> PosixMQ where T: THandler;
+    fn get_flag(&self) -> Option<c_int>;
+    fn open(&self) -> PosixMQ;
 }
 
+#[derive(Debug)]
 pub struct Options {
-    o_flag: Option<c_int>,
+    flag: Option<c_int>,
+    pub handler: Option<Box<dyn THandler>>,
 }
 
 impl TOptions for Options {
-    fn new() -> Self {
+    fn new(flag: c_int) -> Self {
         Options {
-            o_flag: None
+            flag: Some(flag),
+            handler: None,
         }
     }
 
-    fn read_only(&self) -> Self {
-        Options {
-            o_flag: Some(O_RDONLY)
-        }
+    fn read_only() -> Self {
+        Options::new(O_RDONLY)
     }
 
-    fn write_only(&self) -> Self {
-        Options {
-            o_flag: Some(O_WRONLY)
-        }
+    fn write_only() -> Self {
+        Options::new(O_WRONLY)
     }
 
-    fn read_n_write(&self) -> Self {
-        Options {
-            o_flag: Some(O_RDWR)
-        }
+    fn read_n_write() -> Self {
+        Options::new(O_RDWR)
     }
 
-    fn get_o_flag(&self) -> Option<c_int> {
-        if self.o_flag.is_none() {
+    fn with_handler<T>(&mut self, handler: T) -> PosixMQ where T: THandler {
+        self.handler = Some(Box::new(handler));
+        PosixMQ::new(self)
+    }
+
+    fn get_flag(&self) -> Option<c_int> {
+        if self.flag.is_none() {
             return Some(O_RDONLY);
         }
-        self.o_flag
+        self.flag
+    }
+
+    fn open(&self) -> PosixMQ {
+        PosixMQ::new(self)
     }
 }

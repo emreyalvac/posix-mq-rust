@@ -6,6 +6,7 @@ mod handler;
 use std::ffi::CString;
 use std::os::raw::{c_char, c_int};
 use std::sync::{Arc, Mutex};
+use std::sync::mpsc::channel;
 use mq::*;
 use handler::*;
 
@@ -16,6 +17,7 @@ fn send_simulation(queue_fd: c_int) -> c_int {
     }
 }
 
+#[derive(Debug)]
 pub struct Handler {}
 
 impl THandler for Handler {
@@ -26,9 +28,7 @@ impl THandler for Handler {
 
 fn main() {
     let handler = Handler {};
-    let options = Options::new().read_n_write();
-    let mut posix_mq = PosixMQ::new(options, handler);
 
-    posix_mq.create_queue(String::from("/mq_instance_1")).expect("mq_open failed");
-    posix_mq.receive_from_queue();
+    let mut options = Options::read_n_write();
+    options.open().create_queue(String::from("/mqtest")).receive();
 }

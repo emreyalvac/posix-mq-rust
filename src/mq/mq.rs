@@ -1,11 +1,11 @@
 use std::ffi::CString;
+use std::io::Error;
 use std::os::raw::{c_char, c_int, c_long, c_uint};
 use crate::{Handler, Options, THandler, TOptions};
 
 pub const MAX_MESSAGES: c_long = 10;
 pub const MAX_MSG_SIZE: c_long = 2048;
 pub const QUEUE_PERMISSIONS: c_int = 0600;
-pub const SERVER_QUEUE_NAME: &str = "/mqtest.pwPa";
 
 pub const O_RDONLY: c_int = 0;
 pub const O_WRONLY: c_int = 1;
@@ -52,31 +52,31 @@ extern "C" {
     pub fn mq_getattr(mqd_t: c_int, ...) -> c_int;
 }
 
-pub trait TPosixMQ<T> {
-    fn new(options: Options, handler: T) -> Self;
-    fn create_queue(&mut self, queue_name: String) -> Result<i32, i32>;
+pub trait TPosixMQ<'a> {
+    fn new(options: &'a Options) -> Self;
+    fn create_queue(&mut self, queue_name: String) -> &Self;
     fn publish_message(&self, msg: String) -> Result<bool, bool>;
-    fn receive_from_queue(&self) -> ();
-    fn get_queue_attributes(&self) -> Result<MqAttr, MqAttr>;
+    fn receive(&self) -> ();
+    fn get_attrs(&self) -> Result<MqAttr, MqAttr>;
 }
 
-pub struct PosixMQ<T> {
-    options: Options,
+#[derive(Debug)]
+pub struct PosixMQ<'a> {
     queue_fd: c_int,
-    handler: T,
+    options: &'a Options,
 }
 
-impl<T> TPosixMQ<T> for PosixMQ<T> where T: THandler + Send + Sync + Sized {
-    fn new(options: Options, handler: T) -> Self {
+impl<'a> TPosixMQ<'a> for PosixMQ<'a> {
+    fn new(options: &'a Options) -> Self {
         Self {
-            options,
             queue_fd: -1,
-            handler,
+            options,
         }
     }
 
-    fn create_queue(&mut self, queue_name: String) -> Result<i32, i32> {
-        let flag = self.options.get_o_flag().expect("o_flag error");
+    fn create_queue(&mut self, queue_name: String) -> &Self {
+        let flag = self.options.get_flag().expect("Flag not found");
+
         let queue_fd = unsafe {
             let queue_name = CString::new(queue_name).unwrap();
             unsafe {
@@ -87,18 +87,16 @@ impl<T> TPosixMQ<T> for PosixMQ<T> where T: THandler + Send + Sync + Sized {
         self.queue_fd = queue_fd;
 
         if queue_fd < 0 {
-            return Err(-1);
+            panic!("Queue cannot create")
         }
 
-        Ok(queue_fd)
+        self
     }
 
     fn publish_message(&self, msg: String) -> Result<bool, bool> {
         if self.queue_fd < 0 {
             panic!("Queue FD not found")
         }
-
-        // Can we set current message length for receive real size of byte???????
 
         let len = msg.len() as c_int;
         let msg = CString::new(msg).unwrap();
@@ -114,7 +112,9 @@ impl<T> TPosixMQ<T> for PosixMQ<T> where T: THandler + Send + Sync + Sized {
         Ok(true)
     }
 
-    fn receive_from_queue(&self) -> () {
+    fn receive(&self) -> () {
+        let handler = &self.options.handler;
+
         if self.queue_fd < 0 {
             // Check with generic error functions
             panic!("Queue FD not found")
@@ -127,11 +127,13 @@ impl<T> TPosixMQ<T> for PosixMQ<T> where T: THandler + Send + Sync + Sized {
                 mq_receive(self.queue_fd, ptr, MAX_MSG_SIZE as usize, std::ptr::null_mut())
             };
 
-            self.handler.handle_queue_event(buffer.as_ptr())
+            if handler.is_some() {
+                handler.as_ref().unwrap().handle_queue_event(buffer.as_ptr())
+            }
         }
     }
 
-    fn get_queue_attributes(&self) -> Result<MqAttr, MqAttr> {
+    fn get_attrs(&self) -> Result<MqAttr, MqAttr> {
         if self.queue_fd < 0 {
             panic!("Queue FD Not Found")
         }
