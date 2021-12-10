@@ -2,8 +2,6 @@ use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_long, c_uint};
 use crate::{Options, TOptions};
 
-pub const MAX_MESSAGES: c_long = 10;
-pub const MAX_MSG_SIZE: c_long = 2048;
 pub const QUEUE_PERMISSIONS: c_int = 0600;
 
 pub const O_RDONLY: c_int = 0;
@@ -12,12 +10,12 @@ pub const O_CREAT: c_int = 64;
 pub const O_RDWR: c_int = 2;
 pub const O_NONBLOCK: c_int = 2048;
 
-fn build_mq_attr(mq_flags: c_long, mq_curmsgs: c_long) -> MqAttr {
+fn build_mq_attr(mq_msgsize: c_long, mq_maxmsg: c_long, mq_flags: c_long, mq_curmsgs: c_long) -> MqAttr {
     MqAttr {
         mq_flags,
         mq_curmsgs,
-        mq_maxmsg: MAX_MESSAGES,
-        mq_msgsize: MAX_MSG_SIZE,
+        mq_maxmsg,
+        mq_msgsize,
     }
 }
 
@@ -103,11 +101,14 @@ impl<'a> TPosixMQ<'a> for PosixMQ<'a> {
     }
 
     fn create_queue(&mut self, queue_name: String) -> &Self {
-        let flag = self.options.unwrap().get_flag();
+        let options = self.options.unwrap();
+        let flag = options.get_flag();
+        let max_msg_size = options.get_max_messages();
+        let max_msg_buffer_size = options.get_max_message_buffer_size();
 
         let queue_fd = unsafe {
             let queue_name = CString::new(queue_name).unwrap();
-            mq_open(queue_name.as_ptr(), flag | O_CREAT, QUEUE_PERMISSIONS as u32, &build_mq_attr(0, 0))
+            mq_open(queue_name.as_ptr(), flag | O_CREAT, QUEUE_PERMISSIONS as u32, &build_mq_attr(max_msg_buffer_size as c_long, max_msg_size as c_long, 0, 0))
         };
 
         self.queue_fd = queue_fd;
@@ -139,7 +140,9 @@ impl<'a> TPosixMQ<'a> for PosixMQ<'a> {
     }
 
     fn receive(&self) -> () {
-        let handler = &self.options.unwrap().handler;
+        let mut options = self.options.unwrap();
+        let handler = options.get_handler();
+        let max_msg_buffer_size = options.get_max_message_buffer_size();
 
         if self.queue_fd < 0 {
             // Check with generic error functions
@@ -150,7 +153,7 @@ impl<'a> TPosixMQ<'a> for PosixMQ<'a> {
             let buffer = CString::default();
             let ptr = buffer.as_ptr();
             unsafe {
-                mq_receive(self.queue_fd, ptr, MAX_MSG_SIZE as usize, std::ptr::null_mut())
+                mq_receive(self.queue_fd, ptr, max_msg_buffer_size as usize, std::ptr::null_mut())
             };
 
             if handler.is_some() {
