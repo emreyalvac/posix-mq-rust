@@ -1,7 +1,6 @@
-use std::ffi::CString;
-use std::io::Error;
+use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_long, c_uint};
-use crate::{Handler, Options, THandler, TOptions};
+use crate::{Options, TOptions};
 
 pub const MAX_MESSAGES: c_long = 10;
 pub const MAX_MSG_SIZE: c_long = 2048;
@@ -20,6 +19,16 @@ fn build_mq_attr(mq_flags: c_long, mq_curmsgs: c_long) -> MqAttr {
         mq_maxmsg: MAX_MESSAGES,
         mq_msgsize: MAX_MSG_SIZE,
     }
+}
+
+fn check_root() -> Result<bool, bool> {
+    let uid = unsafe { getuid() };
+
+    if uid != 0 {
+        return Err(false);
+    }
+
+    Ok(true)
 }
 
 #[repr(C)]
@@ -44,6 +53,7 @@ impl MqAttr {
 
 #[link(name = "c")]
 extern "C" {
+    pub fn getuid() -> u32;
     pub fn mq_open(server_name: *const c_char, o_flag: c_int, mode_t: u32, ...) -> c_int;
     pub fn mq_send(mqdes: c_int, buffer: *const c_char, buffer_size: c_int, prio: c_uint) -> c_int;
     pub fn mq_receive(mqdes: c_int, buffer: *const c_char, message_size: usize, prio: *const c_uint) -> c_int;
@@ -53,35 +63,51 @@ extern "C" {
 }
 
 pub trait TPosixMQ<'a> {
-    fn new(options: &'a Options) -> Self;
+    fn new() -> Self;
+    fn with_options(&self, options: &'a Options) -> Self;
     fn create_queue(&mut self, queue_name: String) -> &Self;
-    fn publish_message(&self, msg: String) -> Result<bool, bool>;
+    fn publish_message(&self, msg: String) -> Result<c_int, c_int>;
     fn receive(&self) -> ();
     fn get_attrs(&self) -> Result<MqAttr, MqAttr>;
+    fn unlink(&self, queue_name: String) -> ();
+    fn close(&self) -> Result<c_int, c_int>;
 }
 
 #[derive(Debug)]
 pub struct PosixMQ<'a> {
     queue_fd: c_int,
-    options: &'a Options,
+    options: Option<&'a Options>,
 }
 
 impl<'a> TPosixMQ<'a> for PosixMQ<'a> {
-    fn new(options: &'a Options) -> Self {
+    fn new() -> Self {
+        if check_root().is_err() {
+            panic!("Root permission needed");
+        }
+
+        Self {
+            queue_fd: O_RDONLY,
+            options: None,
+        }
+    }
+
+    fn with_options(&self, options: &'a Options) -> Self {
+        if check_root().is_err() {
+            panic!("Root permission needed");
+        }
+
         Self {
             queue_fd: -1,
-            options,
+            options: Some(options),
         }
     }
 
     fn create_queue(&mut self, queue_name: String) -> &Self {
-        let flag = self.options.get_flag().expect("Flag not found");
+        let flag = self.options.unwrap().get_flag();
 
         let queue_fd = unsafe {
             let queue_name = CString::new(queue_name).unwrap();
-            unsafe {
-                mq_open(queue_name.as_ptr(), flag | O_CREAT, QUEUE_PERMISSIONS as u32, &build_mq_attr(0, 0))
-            }
+            mq_open(queue_name.as_ptr(), flag | O_CREAT, QUEUE_PERMISSIONS as u32, &build_mq_attr(0, 0))
         };
 
         self.queue_fd = queue_fd;
@@ -93,7 +119,7 @@ impl<'a> TPosixMQ<'a> for PosixMQ<'a> {
         self
     }
 
-    fn publish_message(&self, msg: String) -> Result<bool, bool> {
+    fn publish_message(&self, msg: String) -> Result<c_int, c_int> {
         if self.queue_fd < 0 {
             panic!("Queue FD not found")
         }
@@ -106,14 +132,14 @@ impl<'a> TPosixMQ<'a> for PosixMQ<'a> {
         };
 
         if send_result < 0 {
-            return Err(false);
+            return Err(-1);
         }
 
-        Ok(true)
+        Ok(0)
     }
 
     fn receive(&self) -> () {
-        let handler = &self.options.handler;
+        let handler = &self.options.unwrap().handler;
 
         if self.queue_fd < 0 {
             // Check with generic error functions
@@ -128,7 +154,8 @@ impl<'a> TPosixMQ<'a> for PosixMQ<'a> {
             };
 
             if handler.is_some() {
-                handler.as_ref().unwrap().handle_queue_event(buffer.as_ptr())
+                let readable = unsafe { CStr::from_ptr(buffer.as_ptr()) };
+                handler.as_ref().unwrap().handle_queue_event(buffer.as_ptr(), readable.to_str().expect("data error"))
             }
         }
     }
@@ -149,5 +176,24 @@ impl<'a> TPosixMQ<'a> for PosixMQ<'a> {
         }
 
         Ok(attr_s)
+    }
+
+    fn unlink(&self, queue_name: String) -> () {
+        let c_str = CString::new(queue_name).unwrap();
+        unsafe {
+            mq_unlink(c_str.as_ptr());
+        }
+    }
+
+    fn close(&self) -> Result<c_int, c_int> {
+        let close = unsafe {
+            mq_close(self.queue_fd)
+        };
+
+        if close < 0 {
+            return Err(-1);
+        }
+
+        Ok(0)
     }
 }

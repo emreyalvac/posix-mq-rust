@@ -1,29 +1,27 @@
-use std::io::Error;
 use std::os::raw::c_int;
-use crate::{Handler, O_RDONLY, O_RDWR, O_WRONLY, PosixMQ, THandler};
-use crate::mq::TPosixMQ;
-
+use crate::{O_NONBLOCK, O_RDONLY, O_RDWR, O_WRONLY, THandler};
 
 pub trait TOptions {
     fn new(flag: c_int) -> Self;
     fn read_only() -> Self;
     fn write_only() -> Self;
     fn read_n_write() -> Self;
-    fn with_handler<T>(&mut self, handler: T) -> PosixMQ where T: THandler;
-    fn get_flag(&self) -> Option<c_int>;
-    fn open(&self) -> PosixMQ;
+    fn with_handler<T>(&mut self, handler: T) -> &mut Self where T: THandler;
+    fn non_blocking(&mut self) -> &mut Self;
+    fn get_flag(&self) -> c_int;
+    fn get_handler(&self) -> &Option<Box<dyn THandler>>;
 }
 
 #[derive(Debug)]
 pub struct Options {
-    flag: Option<c_int>,
+    flag: c_int,
     pub handler: Option<Box<dyn THandler>>,
 }
 
 impl TOptions for Options {
     fn new(flag: c_int) -> Self {
         Options {
-            flag: Some(flag),
+            flag,
             handler: None,
         }
     }
@@ -40,19 +38,25 @@ impl TOptions for Options {
         Options::new(O_RDWR)
     }
 
-    fn with_handler<T>(&mut self, handler: T) -> PosixMQ where T: THandler {
+    fn with_handler<T>(&mut self, handler: T) -> &mut Self where T: THandler {
         self.handler = Some(Box::new(handler));
-        PosixMQ::new(self)
+        self
     }
 
-    fn get_flag(&self) -> Option<c_int> {
-        if self.flag.is_none() {
-            return Some(O_RDONLY);
+    fn non_blocking(&mut self) -> &mut Self {
+        self.flag |= O_NONBLOCK;
+
+        self
+    }
+
+    fn get_flag(&self) -> c_int {
+        if self.flag < 0 {
+            return O_RDONLY;
         }
         self.flag
     }
 
-    fn open(&self) -> PosixMQ {
-        PosixMQ::new(self)
+    fn get_handler(&self) -> &Option<Box<dyn THandler>> {
+        &self.handler
     }
 }

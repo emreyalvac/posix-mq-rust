@@ -18,18 +18,22 @@ sudo mount -t mqueue none /dev/mqueue/
 pub struct Handler {}
 
 impl THandler for Handler {
-    fn handle_queue_event(&self, buffer: *const c_char) -> () {
-        println!("{:?}", buffer);
+    fn handle_queue_event(&self, buffer: *const c_char, data: &str) -> () {
+        println!("{:?} {:?}", buffer, data);
     }
 }
 ```
 
 ```rust
-let handler = Handler {};
-let options = Options::new().read_n_write();
-let mut posix_mq = PosixMQ::new(options, handler);
+fn main() {
+    let handler = Handler {};
 
-posix_mq.create_queue(String::from("/mq_instance_1")).expect("mq_open failed");
+    let mut options = Options::read_n_write();
+    options.with_handler(handler);
 
-posix_mq.receive_from_queue();
+    let mut posix_mq = PosixMQ::new().with_options(&options);
+    posix_mq.create_queue(String::from("/mqtest"));
+
+    posix_mq.receive();
+}
 ```
