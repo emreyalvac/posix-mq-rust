@@ -1,5 +1,14 @@
-use crate::{O_NONBLOCK, O_RDONLY, O_RDWR, O_WRONLY, THandler};
+use crate::{THandler};
 use std::os::raw::{c_int};
+
+pub const O_RDONLY: c_int = 0;
+pub const O_WRONLY: c_int = 1;
+pub const O_CREAT: c_int = 64;
+pub const O_RDWR: c_int = 2;
+pub const O_NONBLOCK: c_int = 2048;
+
+pub const SIGEV_THREAD: c_int = 2;
+pub const SIGEV_SIGNAL: c_int = 0;
 
 pub trait TOptions {
     fn new(flag: c_int) -> Self;

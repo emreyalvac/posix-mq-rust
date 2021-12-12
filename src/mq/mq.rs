@@ -1,14 +1,9 @@
-use std::ffi::{CStr, CString};
+use std::ffi::{c_void, CStr, CString};
+use std::fmt::{Debug, Formatter};
 use std::os::raw::{c_char, c_int, c_long, c_uint};
-use crate::{Options, TOptions};
+use crate::{O_CREAT, O_RDONLY, Options, SIGEV_SIGNAL, SIGEV_THREAD, TOptions};
 
 pub const QUEUE_PERMISSIONS: c_int = 0600;
-
-pub const O_RDONLY: c_int = 0;
-pub const O_WRONLY: c_int = 1;
-pub const O_CREAT: c_int = 64;
-pub const O_RDWR: c_int = 2;
-pub const O_NONBLOCK: c_int = 2048;
 
 fn build_mq_attr(mq_msgsize: c_long, mq_maxmsg: c_long, mq_flags: c_long, mq_curmsgs: c_long) -> MqAttr {
     MqAttr {
@@ -38,6 +33,30 @@ pub struct MqAttr {
     pub mq_curmsgs: c_long,
 }
 
+#[repr(C)]
+pub union sigval {
+    pub sival_int: c_int,
+    pub sival_ptr: *const c_void,
+}
+
+impl Debug for sigval {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        unsafe {
+            f.debug_struct("sigval").field("sival_int", &self.sival_int).finish()
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Debug)]
+pub struct sigevent {
+    pub sigev_value: sigval,
+    pub sigev_signo: c_int,
+    pub sigev_notify: c_int,
+    pub sigev_notify_function: *const c_void,
+    pub sigev_notify_attributes: c_int,
+}
+
 impl MqAttr {
     fn new() -> Self {
         MqAttr {
@@ -49,6 +68,10 @@ impl MqAttr {
     }
 }
 
+fn handler_signal(val: sigval) {
+    println!("SIGNAL: {:?}", val);
+}
+
 #[link(name = "c")]
 extern "C" {
     pub fn getuid() -> u32;
@@ -58,6 +81,8 @@ extern "C" {
     pub fn mq_unlink(name: *const c_char) -> c_int;
     pub fn mq_close(mqd_t: c_int) -> c_int;
     pub fn mq_getattr(mqd_t: c_int, ...) -> c_int;
+    pub fn mq_notify(mqd_t: c_int, sigevent: *const sigevent) -> c_int;
+    pub fn pause() -> !;
 }
 
 pub trait TPosixMQ<'a> {
@@ -66,9 +91,11 @@ pub trait TPosixMQ<'a> {
     fn create_queue(&mut self, queue_name: String) -> &Self;
     fn publish_message(&self, msg: String) -> Result<c_int, c_int>;
     fn receive(&self) -> ();
+    fn notify(&self) -> ();
     fn get_attrs(&self) -> Result<MqAttr, MqAttr>;
     fn unlink(&self, queue_name: String) -> ();
     fn close(&self) -> Result<c_int, c_int>;
+    fn pause(&self) -> !;
 }
 
 #[derive(Debug)]
@@ -163,6 +190,27 @@ impl<'a> TPosixMQ<'a> for PosixMQ<'a> {
         }
     }
 
+    fn notify(&self) -> () {
+        let handler_ptr = handler_signal as *const c_void;
+        let fd = self.queue_fd as *const c_void;
+        let sigval = sigval { sival_ptr: fd };
+
+        let sigval = sigevent {
+            sigev_value: sigval,
+            sigev_signo: -1,
+            sigev_notify: SIGEV_THREAD,
+            sigev_notify_function: handler_ptr,
+            sigev_notify_attributes: 0,
+        };
+
+
+        unsafe {
+            mq_notify(self.queue_fd, &sigval as *const sigevent);
+        };
+
+        ()
+    }
+
     fn get_attrs(&self) -> Result<MqAttr, MqAttr> {
         if self.queue_fd < 0 {
             panic!("Queue FD Not Found")
@@ -198,5 +246,9 @@ impl<'a> TPosixMQ<'a> for PosixMQ<'a> {
         }
 
         Ok(0)
+    }
+
+    fn pause(&self) -> ! {
+        unsafe { pause() };
     }
 }

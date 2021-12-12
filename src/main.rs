@@ -25,5 +25,7 @@ fn main() {
 
     let attrs = posix_mq.get_attrs();
 
-    posix_mq.receive();
+    posix_mq.notify();
+    // posix_mq.receive();
+    posix_mq.pause();
 }
